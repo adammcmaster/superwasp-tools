@@ -6,9 +6,9 @@ from IPython.display import Image, display
 
 def load_objects():
     objects = pandas.read_csv(
-    os.path.join('superwasp-data', 'results_total.dat'),
-    delim_whitespace=True,
-    header=None,
+        os.path.join('superwasp-data', 'results_total.dat'),
+        delim_whitespace=True,
+        header=None,
     )
     objects.columns = [
         'Camera Number',
