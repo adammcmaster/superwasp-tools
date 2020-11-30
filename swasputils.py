@@ -2,7 +2,7 @@ import os
 import yaml
 
 import pandas
-from IPython.display import Image, display
+
 
 def load_objects():
     objects = pandas.read_csv(
@@ -25,7 +25,7 @@ def load_objects():
         lambda x: ''.join(x.astype(str)),
         axis=1
     )
-    objects.drop(['SWASP', 'ID'], 'columns', inplace=True)
+    objects.drop(['SWASP', 'ID', 'Period Flag', 'Camera Number'], 'columns', inplace=True)
     return objects
 
 def load_lookup():
@@ -40,22 +40,22 @@ def load_lookup():
         'Period',
         'Period Number',
     ]
+    zoo_lookup.drop('Period', 'columns', inplace=True)
     return zoo_lookup
 
 def load_zoo_subjects():
     return pandas.read_csv(
         os.path.join('superwasp-data', 'superwasp-variable-stars-subjects.csv'),
-    )
+    )[['locations', 'subject_id']]
 
-def get_zoo_ids(objects, lookup, fields=['SWASP ID', 'Period Number']):
-    return lookup[
-        lookup[fields].apply(tuple, axis=1).isin(
-            objects[fields].apply(tuple, axis=1)
-        )
-    ]['Zooniverse ID']
+def merge_zoo_ids(objects, lookup, fields=['SWASP ID', 'Period Number']):
+    return pandas.merge(objects, lookup, left_on=fields, right_on=fields)
 
-def display_zoo_lightcurves(zoo_ids, zoo_subjects):
-    locations = zoo_subjects[zoo_subjects['subject_id'].isin(zoo_ids)]['locations'].apply(
+def merge_zoo_subjects(objects, zoo_subjects):
+    return pandas.merge(objects, zoo_subjects, left_on='Zooniverse ID', right_on='subject_id').drop('subject_id', 'columns')
+
+def decode_zoo_locations(objects):
+    objects['Lightcurve'] = objects['locations'].apply(
         lambda s: yaml.load(s)['0']
     )
-    locations.apply(lambda s: display(Image(url=s, width=500, height=500)))
+    return objects.drop('locations', 'columns')
