@@ -4,9 +4,11 @@ import yaml
 import pandas
 
 
+DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
+
 def load_objects():
     objects = pandas.read_csv(
-        os.path.join('superwasp-data', 'results_total.dat'),
+        os.path.join(DATA_LOCATION, 'results_total.dat'),
         delim_whitespace=True,
         header=None,
     )
@@ -26,7 +28,7 @@ def load_objects():
 
 def load_lookup():
     zoo_lookup = pandas.read_csv(
-        os.path.join('superwasp-data', 'lookup.dat'),
+        os.path.join(DATA_LOCATION, 'lookup.dat'),
         delim_whitespace=True,
         header=None,
     )
@@ -41,8 +43,30 @@ def load_lookup():
 
 def load_zoo_subjects():
     return pandas.read_csv(
-        os.path.join('superwasp-data', 'superwasp-variable-stars-subjects.csv'),
+        os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
     )[['locations', 'subject_id']]
+
+def load_classifications():
+    classifications = pandas.read_csv(
+        os.path.join(DATA_LOCATION, 'class_top.csv'),
+        delim_whitespace=True,
+        header=None,
+    )
+    classifications.columns = [
+        'Zooniverse ID',
+        'SWASP ID',
+        'Period Number',
+        'Period',
+        'Classification',
+        'Period Uncertainty',
+        'Classification Count'
+    ]
+    classifications.drop([
+        'SWASP ID',
+        'Period Number',
+        'Period',
+    ], 'columns', inplace=True)
+    return classifications
 
 def merge_zoo_ids(objects, lookup):
     MERGE_FIELDS = ['SWASP ID', 'Period Number']
@@ -60,6 +84,15 @@ def merge_zoo_subjects(objects, zoo_subjects):
         left_on='Zooniverse ID',
         right_on='subject_id',
     ).drop('subject_id', 'columns')
+
+def merge_classifications(objects, classifications):
+    return pandas.merge(
+        objects,
+        classifications,
+        left_on='Zooniverse ID',
+        right_on='Zooniverse ID',
+        how='left',
+    )
 
 def decode_zoo_locations(objects):
     objects['Lightcurve'] = objects['locations'].apply(
