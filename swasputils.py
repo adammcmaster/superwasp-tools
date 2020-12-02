@@ -75,11 +75,6 @@ def load_manual_classifications():
 
 def merge_zoo_ids(objects, lookup):
     MERGE_FIELDS = ['SWASP ID', 'Period Number']
-    objects['SWASP ID'] = objects[['SWASP', 'ID']].apply(
-        lambda x: ''.join(x.astype(str)),
-        axis=1
-    )
-    objects.drop(['SWASP', 'ID'], 'columns', inplace=True)
     return pandas.merge(objects, lookup, left_on=MERGE_FIELDS, right_on=MERGE_FIELDS)
 
 def merge_zoo_subjects(objects, zoo_subjects):
@@ -115,7 +110,17 @@ def decode_zoo_locations(objects):
     return objects.drop('locations', 'columns')
 
 def decode_manual_annotations(objects):
-    objects['Manual Classification'] = objects['annotations'].apply(
-        lambda s: yaml.load(s)[0]['value'] if s else ''
-    )
+    def decode(s):
+        try:
+            return yaml.load(s)[0]['value']
+        except (AttributeError, IndexError, KeyError):
+            return None
+    objects['Manual Classification'] = objects['annotations'].apply(decode)
     return objects.drop('annotations', 'columns')
+
+def join_swasp_ids(objects):
+    objects['SWASP ID'] = objects[['SWASP', 'ID']].apply(
+        lambda x: ''.join(x.astype(str)),
+        axis=1
+    )
+    objects.drop(['SWASP', 'ID'], 'columns', inplace=True)
