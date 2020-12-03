@@ -6,7 +6,7 @@ import pandas
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
 
-def load_objects():
+def load_objects(min_period=8640000):
     objects = pandas.read_csv(
         os.path.join(DATA_LOCATION, 'results_total.dat'),
         delim_whitespace=True,
@@ -22,7 +22,7 @@ def load_objects():
         'Chi Squared',
         'Period Flag'
     ]
-    objects = objects[(objects['Period Flag'] == 0) & (objects['Period'] >= 8640000)]
+    objects = objects[(objects['Period Flag'] == 0) & (objects['Period'] >= min_period)]
     objects.drop(['Period Flag', 'Camera Number'], 'columns', inplace=True)
     return objects
 
