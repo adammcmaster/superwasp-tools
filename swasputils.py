@@ -24,6 +24,7 @@ def load_objects(min_period=8640000):
     ]
     objects = objects[(objects['Period Flag'] == 0) & (objects['Period'] >= min_period)]
     objects.drop(['Period Flag', 'Camera Number'], 'columns', inplace=True)
+    objects['SWASP ID'] = objects['SWASP'] + objects['ID']
     return objects
 
 def load_lookup():
@@ -117,10 +118,3 @@ def decode_manual_annotations(objects):
             return None
     objects['Manual Classification'] = objects['annotations'].apply(decode)
     return objects.drop('annotations', 'columns')
-
-def join_swasp_ids(objects):
-    objects['SWASP ID'] = objects[['SWASP', 'ID']].apply(
-        lambda x: ''.join(x.astype(str)),
-        axis=1
-    )
-    objects.drop(['SWASP', 'ID'], 'columns', inplace=True)
