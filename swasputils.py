@@ -7,124 +7,11 @@ from IPython.display import Image, display
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
 
-def load_objects(min_period=8640000):
-    objects = pandas.read_csv(
-        os.path.join(DATA_LOCATION, 'results_total.dat'),
-        delim_whitespace=True,
-        header=None,
-    )
-    objects.columns = [
-        'Camera Number',
-        'SWASP',
-        'ID',
-        'Period Number',
-        'Period',
-        'Sigma',
-        'Chi Squared',
-        'Period Flag'
-    ]
-    objects = objects[(objects['Period Flag'] == 0) & (objects['Period'] >= min_period)]
-    objects.drop(['Period Flag', 'Camera Number'], 'columns', inplace=True)
-    objects['SWASP ID'] = objects['SWASP'] + objects['ID']
-    return objects
-
-def load_lookup():
-    zoo_lookup = pandas.read_csv(
-        os.path.join(DATA_LOCATION, 'lookup.dat'),
-        delim_whitespace=True,
-        header=None,
-    )
-    zoo_lookup.columns = [
-        'Zooniverse ID',
-        'SWASP ID',
-        'Period',
-        'Period Number',
-    ]
-    zoo_lookup.drop('Period', 'columns', inplace=True)
-    return zoo_lookup
-
-def load_zoo_subjects():
-    return pandas.read_csv(
-        os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
-    )[['locations', 'subject_id']]
-
-def load_classifications():
-    classifications = pandas.read_csv(
-        os.path.join(DATA_LOCATION, 'class_top.csv'),
-        delim_whitespace=True,
-        header=None,
-    )
-    classifications.columns = [
-        'Zooniverse ID',
-        'SWASP ID',
-        'Period Number',
-        'Period',
-        'Classification',
-        'Period Uncertainty',
-        'Classification Count'
-    ]
-    classifications.drop([
-        'SWASP ID',
-        'Period Number',
-        'Period',
-    ], 'columns', inplace=True)
-    return classifications
-
-def load_manual_classifications():
-    return pandas.read_csv(
-        os.path.join(DATA_LOCATION, 'superwasp-long-periods-classifications.csv'),
-    )[['subject_ids', 'annotations']]
-
-def merge_zoo_ids(objects, lookup):
-    MERGE_FIELDS = ['SWASP ID', 'Period Number']
-    return pandas.merge(objects, lookup, left_on=MERGE_FIELDS, right_on=MERGE_FIELDS)
-
-def merge_zoo_subjects(objects, zoo_subjects):
-    return pandas.merge(
-        objects,
-        zoo_subjects,
-        left_on='Zooniverse ID',
-        right_on='subject_id',
-    ).drop('subject_id', 'columns')
-
-def merge_classifications(objects, classifications):
-    return pandas.merge(
-        objects,
-        classifications,
-        left_on='Zooniverse ID',
-        right_on='Zooniverse ID',
-        how='left',
-    )
-
-def merge_manual_classifications(objects, classifications):
-    return pandas.merge(
-        objects,
-        classifications,
-        left_on='Zooniverse ID',
-        right_on='subject_ids',
-        how='left',
-    ).drop('subject_ids', 'columns')
-
-def decode_zoo_locations(objects):
-    objects['Lightcurve'] = objects['locations'].apply(
-        lambda s: yaml.load(s)['0']
-    )
-    return objects.drop('locations', 'columns')
-
-def decode_manual_annotations(objects):
-    def decode(s):
-        try:
-            return yaml.load(s)[0]['value']
-        except (AttributeError, IndexError, KeyError):
-            return None
-    objects['Manual Classification'] = objects['annotations'].apply(decode)
-    return objects.drop('annotations', 'columns')
-
 
 class ZooniverseSubjects(object):
     def __init__(self, df=None):
         if df is not None:
-            self.df = df.copy()
+            self.df = df
             return
         
         self.df = pandas.read_csv(
@@ -135,10 +22,21 @@ class ZooniverseSubjects(object):
     def subject_sets(self):
         return { set_id: self.get_subject_set(set_id) for set_id in set(self.df['subject_set_id']) }
     
+    @property
+    def workflows(self):
+        return { 
+            workflow_id: self.get_workflow(workflow_id) 
+            for workflow_id in set(self.df[self.df['workflow_id'].notna()]['workflow_id'])
+        }
+    
     def get_subject_set(self, set_id):
         return ZooniverseSubjects(df=self.df[self.df['subject_set_id'] == set_id])
     
+    def get_workflow(self, workflow_id):
+        return ZooniverseSubjects(df=self.df[self.df['workflow_id'] == workflow_id])
+    
     def decode_locations(self, index=0, target='lightcurve'):
+        self.df = self.df.copy()
         self.df[target] = self.df['locations'].apply(
             lambda s: yaml.full_load(s)[str(index)]
         )
@@ -157,7 +55,7 @@ class FoldedLightcurves(object):
         self.min_period = min_period
         
         if df is not None:
-            self.df = df.copy()
+            self.df = df
             return
         
         self.df = pandas.read_csv(
@@ -183,18 +81,48 @@ class FoldedLightcurves(object):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
 
 
-class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves):
-    def __init__(self, zooniverse_subjects=None, folded_lightcurves=None, df=None, min_period=0):
+class AggregatedClassifications(object):
+    def __init__(self):
+        self.df = pandas.read_csv(
+            os.path.join(DATA_LOCATION, 'class_top.csv'),
+            delim_whitespace=True,
+            header=None,
+        )
+        self.df.columns = [
+            'subject_id',
+            'SWASP ID',
+            'Period Number',
+            'Period',
+            'Classification',
+            'Period Uncertainty',
+            'Classification Count'
+        ]
+        self.df.drop([
+            'Period',
+        ], 'columns', inplace=True)
+
+
+class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassifications):
+    def __init__(
+        self, 
+        zooniverse_subjects=None, 
+        folded_lightcurves=None,
+        aggregated_classifications=None,
+        df=None, 
+        min_period=0
+    ):
         self.min_period = min_period
         
         if df is not None:
-            self.df = df.copy()
+            self.df = df
             return
         
         if not zooniverse_subjects:
             zooniverse_subjects = ZooniverseSubjects()
         if not folded_lightcurves:
             folded_lightcurves = FoldedLightcurves(min_period=min_period)
+        if not aggregated_classifications:
+            aggregated_classifications = AggregatedClassifications()
         
         LC_MERGE_FIELDS = ['SWASP ID', 'Period Number']
         
@@ -204,6 +132,10 @@ class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves):
             right_on=LC_MERGE_FIELDS,
         ).merge(
             zooniverse_subjects.df,
+            left_on='subject_id',
+            right_on='subject_id',
+        ).merge(
+            aggregated_classifications.df,
             left_on='subject_id',
             right_on='subject_id',
         )
@@ -231,3 +163,5 @@ class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves):
             swasp_id = obj_id
         
         return super().get_siblings(swasp_id)
+    
+
