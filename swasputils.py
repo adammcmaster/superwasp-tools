@@ -50,6 +50,27 @@ class ZooniverseSubjects(object):
         )
 
 
+class ZooniverseClassifications(object):
+    def __init__(self, df=None):
+        if df is not None:
+            self.df = df
+            return
+        
+        self.df = pandas.read_csv(
+            os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
+        )
+    
+    @property
+    def workflows(self):
+        return { 
+            workflow_id: self.get_workflow(workflow_id) 
+            for workflow_id in set(self.df[self.df['workflow_id'].notna()]['workflow_id'])
+        }
+    
+    def get_workflow(self, workflow_id):
+        return ZooniverseClassifications(df=self.df[self.df['workflow_id'] == workflow_id])
+
+        
 class FoldedLightcurves(object):
     def __init__(self, min_period=0, df=None):
         self.min_period = min_period
