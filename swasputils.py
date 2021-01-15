@@ -1,7 +1,8 @@
 import os
-import yaml
 
+import yaml
 import pandas
+
 from IPython.display import Image, display
 
 
@@ -58,6 +59,7 @@ class ZooniverseClassifications(object):
         
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
+            index_col='classification_id',
         )
     
     @property
@@ -70,7 +72,19 @@ class ZooniverseClassifications(object):
     def get_workflow(self, workflow_id):
         return ZooniverseClassifications(df=self.df[self.df['workflow_id'] == workflow_id])
 
+    def decode_annotations(self):
+        self.df = self.df.copy()
         
+        ANNOTATION_COL_FORMAT = 'annotation_{}'
+        
+        for classification_id, annotations in self.df['annotations'].items():
+            for annotation in yaml.full_load(annotations):
+                annotation_col = ANNOTATION_COL_FORMAT.format(annotation['task'])
+                if annotation_col not in self.df:
+                    self.df[annotation_col] = pandas.Series([], dtype=str)
+                self.df.at[classification_id, annotation_col] = annotation['value']
+
+
 class FoldedLightcurves(object):
     def __init__(self, min_period=0, df=None):
         self.min_period = min_period
