@@ -29,6 +29,14 @@ class ZooniverseSubjects(object):
             workflow_id: self.get_workflow(workflow_id) 
             for workflow_id in set(self.df[self.df['workflow_id'].notna()]['workflow_id'])
         }
+
+    @property
+    def retired(self):
+        return self.df[self.df['retired_at'].notna()]
+
+    @property
+    def active(self):
+        return self.df[self.df['retired_at'].isna()]
     
     def get_subject_set(self, set_id):
         return ZooniverseSubjects(df=self.df[self.df['subject_set_id'] == set_id])
