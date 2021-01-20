@@ -32,11 +32,11 @@ class ZooniverseSubjects(object):
 
     @property
     def retired(self):
-        return self.df[self.df['retired_at'].notna()]
+        return ZooniverseSubjects(df=self.df[self.df['retired_at'].notna()])
 
     @property
     def active(self):
-        return self.df[self.df['retired_at'].isna()]
+        return ZooniverseSubjects(df=self.df[self.df['retired_at'].isna()])
     
     def get_subject_set(self, set_id):
         return ZooniverseSubjects(df=self.df[self.df['subject_set_id'] == set_id])
