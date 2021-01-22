@@ -63,7 +63,7 @@ class ZooniverseSubjects(object):
 class ZooniverseClassifications(object):
     ANNOTATION_PREFIX = 'annotation_'
     
-    def __init__(self, df=None):
+    def __init__(self, df=None, drop_duplicates=False, duplicate_columns=('subject_ids', 'user_id')):
         if df is not None:
             self.df = df
             return
@@ -72,6 +72,8 @@ class ZooniverseClassifications(object):
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
             index_col='classification_id',
         )
+        if drop_duplicates:
+            self.df.drop_duplicates(duplicate_columns, inplace=True)
     
     @property
     def workflows(self):
@@ -83,7 +85,7 @@ class ZooniverseClassifications(object):
     @property
     def annotations(self):
         self.decode_annotations()
-        return self.df[['subject_ids'] + self.annotation_keys]
+        return self.df[['subject_ids', 'user_id'] + self.annotation_keys]
     
     @property
     def annotation_keys(self):
@@ -109,13 +111,17 @@ class ZooniverseClassifications(object):
                 self.df.at[classification_id, annotation_col] = annotation['value']
         self.df.drop('annotations', 'columns', inplace=True)
     
-    def count_annotations(self, col=None):
+    def count_annotations(self, col=None, drop_duplicates=True):
         self.decode_annotations()
         if not col:
             col = self.annotation_keys[0]
-            
+
+        df = self.annotations.reset_index()
+        if drop_duplicates:
+            df.drop_duplicates(['user_id', 'subject_ids'], inplace=True)
+
         return pandas.pivot_table(
-            self.annotations.reset_index(), 
+            df, 
             index='subject_ids', 
             values='classification_id', 
             columns=col,
