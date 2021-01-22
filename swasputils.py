@@ -17,6 +17,7 @@ class ZooniverseSubjects(object):
         
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
+            index_col='subject_id'
         )
     
     @property
@@ -32,17 +33,17 @@ class ZooniverseSubjects(object):
 
     @property
     def retired(self):
-        return ZooniverseSubjects(df=self.df[self.df['retired_at'].notna()])
+        return self.__class__(df=self.df[self.df['retired_at'].notna()])
 
     @property
     def active(self):
-        return ZooniverseSubjects(df=self.df[self.df['retired_at'].isna()])
+        return self.__class__(df=self.df[self.df['retired_at'].isna()])
     
     def get_subject_set(self, set_id):
-        return ZooniverseSubjects(df=self.df[self.df['subject_set_id'] == set_id])
+        return self.__class__(df=self.df[self.df['subject_set_id'] == set_id])
     
     def get_workflow(self, workflow_id):
-        return ZooniverseSubjects(df=self.df[self.df['workflow_id'] == workflow_id])
+        return self.__class__(df=self.df[self.df['workflow_id'] == workflow_id])
     
     def decode_locations(self, index=0, target='lightcurve'):
         self.df = self.df.copy()
@@ -60,6 +61,8 @@ class ZooniverseSubjects(object):
 
 
 class ZooniverseClassifications(object):
+    ANNOTATION_PREFIX = 'annotation_'
+    
     def __init__(self, df=None):
         if df is not None:
             self.df = df
@@ -77,20 +80,48 @@ class ZooniverseClassifications(object):
             for workflow_id in set(self.df[self.df['workflow_id'].notna()]['workflow_id'])
         }
     
+    @property
+    def annotations(self):
+        self.decode_annotations()
+        return self.df[['subject_ids'] + self.annotation_keys]
+    
+    @property
+    def annotation_keys(self):
+        self.decode_annotations()
+        return [col for col in self.df.keys() if col.startswith(self.ANNOTATION_PREFIX)]
+    
     def get_workflow(self, workflow_id):
         return ZooniverseClassifications(df=self.df[self.df['workflow_id'] == workflow_id])
+    
+    def get_subjects(self, subject_ids):
+        return ZooniverseClassifications(df=self.df[self.df['subject_ids'].isin(subject_ids)])
 
     def decode_annotations(self):
+        if not 'annotations' in self.df.keys():
+            return
         self.df = self.df.copy()
-        
-        ANNOTATION_COL_FORMAT = 'annotation_{}'
         
         for classification_id, annotations in self.df['annotations'].items():
             for annotation in yaml.full_load(annotations):
-                annotation_col = ANNOTATION_COL_FORMAT.format(annotation['task'])
+                annotation_col = self.ANNOTATION_PREFIX + annotation['task']
                 if annotation_col not in self.df:
                     self.df[annotation_col] = pandas.Series([], dtype=str)
                 self.df.at[classification_id, annotation_col] = annotation['value']
+        self.df.drop('annotations', 'columns', inplace=True)
+    
+    def count_annotations(self, col=None):
+        self.decode_annotations()
+        if not col:
+            col = self.annotation_keys[0]
+            
+        return pandas.pivot_table(
+            self.annotations.reset_index(), 
+            index='subject_ids', 
+            values='classification_id', 
+            columns=col,
+            aggfunc=lambda x: len(x.unique()),
+            fill_value=0,
+        )
 
 
 class FoldedLightcurves(object):
@@ -138,11 +169,10 @@ class AggregatedClassifications(object):
             'Period',
             'Classification',
             'Period Uncertainty',
-            'Classification Count'
+            'Classification Count',
         ]
-        self.df.drop([
-            'Period',
-        ], 'columns', inplace=True)
+        self.df.drop('Period', 'columns', inplace=True)
+        self.df.set_index('subject_id')
 
 
 class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassifications):
@@ -167,21 +197,16 @@ class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassific
         if not aggregated_classifications:
             aggregated_classifications = AggregatedClassifications()
         
-        LC_MERGE_FIELDS = ['SWASP ID', 'Period Number']
-        
-        self.df = folded_lightcurves.df.merge(
+        self.df = zooniverse_subjects.df.reset_index().merge(
             self.zoo_lookup,
-            left_on=LC_MERGE_FIELDS,
-            right_on=LC_MERGE_FIELDS,
+            how='left',
         ).merge(
-            zooniverse_subjects.df,
-            left_on='subject_id',
-            right_on='subject_id',
+            aggregated_classifications.df.reset_index(),
+            how='left',
         ).merge(
-            aggregated_classifications.df,
-            left_on='subject_id',
-            right_on='subject_id',
-        )
+            folded_lightcurves.df.reset_index(),
+            how='left',
+        ).set_index('subject_id')
     
     @property
     def zoo_lookup(self):
@@ -201,7 +226,7 @@ class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassific
     
     def get_siblings(self, obj_id):
         if type(obj_id) == int:
-            swasp_id = self.df[self.df['subject_id'] == obj_id].iloc[0]['SWASP ID']
+            swasp_id = self.df[self.df.index == obj_id].iloc[0]['SWASP ID']
         else:
             swasp_id = obj_id
         
