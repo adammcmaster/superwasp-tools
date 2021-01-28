@@ -180,6 +180,21 @@ class FoldedLightcurves(object):
 
 
 class AggregatedClassifications(object):
+    PULSATOR = 1
+    EA_EB = 2
+    EW = 3
+    ROTATOR = 4
+    UNKNOWN = 5
+    JUNK = 6
+    CLASSIFICATION_LABELS = {
+        PULSATOR: 'Pulsator',
+        EA_EB: 'EA/EB',
+        EW: 'EW',
+        ROTATOR: 'Rotator',
+        UNKNOWN: 'Unknown',
+        JUNK: 'Junk',
+    }
+
     def __init__(self):
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'class_top.csv'),
@@ -198,6 +213,11 @@ class AggregatedClassifications(object):
         self.df.drop('Period', 'columns', inplace=True)
         self.df.set_index('subject_id')
 
+    def add_classification_labels(self):
+        self.df['Classification Label'] = self.get_classification_labels(self.df['Classification'])
+
+    def get_classification_labels(self, series):
+        return series.apply(self.CLASSIFICATION_LABELS.get)
 
 class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassifications):
     def __init__(
