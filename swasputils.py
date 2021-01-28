@@ -156,6 +156,24 @@ class FoldedLightcurves(object):
         self.df = self.df[(self.df['Period Flag'] == 0) & (self.df['Period'] >= min_period)]
         self.df['SWASP ID'] = self.df['SWASP'] + self.df['ID']
         self.df.drop(['Period Flag', 'Camera Number', 'SWASP', 'ID'], 'columns', inplace=True)
+
+        def decode_coords(self):
+            if 'ra' in self.df and 'dec' in self.df:
+                return
+
+            #self.df
+            coords = superwasp_id.replace('1SWASP', '')
+            coords_quoted = urllib.parse.quote(coords)
+            ra = urllib.parse.quote('{}:{}:{}'.format(
+                coords[1:3],
+                coords[3:5],
+                coords[5:10]
+            ))
+            dec = urllib.parse.quote('{}:{}:{}'.format(
+                coords[10:13],
+                coords[13:15],
+                coords[15:]
+            ))
         
     def get_siblings(self, swasp_id):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
