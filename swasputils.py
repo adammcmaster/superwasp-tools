@@ -195,7 +195,11 @@ class AggregatedClassifications(object):
         JUNK: 'Junk',
     }
 
-    def __init__(self):
+    def __init__(self, df=None):
+        if df is not None:
+            self.df = df
+            return
+
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'class_top.csv'),
             delim_whitespace=True,
@@ -210,14 +214,42 @@ class AggregatedClassifications(object):
             'Period Uncertainty',
             'Classification Count',
         ]
-        self.df.drop('Period', 'columns', inplace=True)
-        self.df.set_index('subject_id')
+        self.df.set_index('subject_id', inplace=True)
 
     def add_classification_labels(self):
+        self.df = self.df.copy()
         self.df['Classification Label'] = self.get_classification_labels(self.df['Classification'])
 
     def get_classification_labels(self, series):
-        return series.apply(self.CLASSIFICATION_LABELS.get)
+        return series.apply(lambda c: self.CLASSIFICATION_LABELS.get(c, None))
+
+    def get_class(self, classification):
+        return self.__class__(df=self.df[self.df['Classification'] == classification])
+
+    @property
+    def pulsators(self):
+        return self.get_class(self.PULSATOR)
+
+    @property
+    def eaebs(self):
+        return self.get_class(self.EA_EB)
+
+    @property
+    def ews(self):
+        return self.get_class(self.EW)
+
+    @property
+    def rotators(self):
+        return self.get_class(self.ROTATOR)
+
+    @property
+    def unknowns(self):
+        return self.get_class(self.UNKNOWN)
+
+    @property
+    def junk(self):
+        return self.get_class(self.JUNK)
+
 
 class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassifications):
     def __init__(
