@@ -1,7 +1,7 @@
 import os
 
-import yaml
 import pandas
+import ujson
 
 from IPython.display import Image, display
 
@@ -48,7 +48,7 @@ class ZooniverseSubjects(object):
     def decode_locations(self, index=0, target='lightcurve'):
         self.df = self.df.copy()
         self.df[target] = self.df['locations'].apply(
-            lambda s: yaml.full_load(s)[str(index)]
+            lambda s: ujson.loads(s)[str(index)]
         )
     
     def display_lightcurves(self, col='lightcurve'):
@@ -104,7 +104,7 @@ class ZooniverseClassifications(object):
         self.df = self.df.copy()
         
         for classification_id, annotations in self.df['annotations'].items():
-            for annotation in yaml.full_load(annotations):
+            for annotation in ujson.loads(annotations):
                 annotation_col = self.ANNOTATION_PREFIX + annotation['task']
                 if annotation_col not in self.df:
                     self.df[annotation_col] = pandas.Series([], dtype=str)
