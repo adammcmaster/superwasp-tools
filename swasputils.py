@@ -97,6 +97,9 @@ class ZooniverseClassifications(object):
     
     def get_subjects(self, subject_ids):
         return ZooniverseClassifications(df=self.df[self.df['subject_ids'].isin(subject_ids)])
+    
+    def get_users(self, user_names):
+        return ZooniverseClassifications(df=self.df[self.df['user_name'].isin(user_names)])
 
     def decode_annotations(self):
         if not 'annotations' in self.df.keys():
