@@ -4,9 +4,13 @@ import pandas
 import ujson
 
 from IPython.display import Image, display
+from astropy.coordinates import SkyCoord
+from astropy import units as u
+from astroquery.vizier import Vizier
 
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
+SECONDS_PER_DAY = 60 * 60 * 24
 
 
 class ZooniverseSubjects(object):
@@ -133,7 +137,63 @@ class ZooniverseClassifications(object):
         )
 
 
-class FoldedLightcurves(object):
+class CoordinatesMixin(object):
+    @property
+    def coords(self):
+        return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
+    
+    def add_coords(self):
+        self.df['Coords'] = self.coords
+    
+    def _get_vsx_types_for_row(self, row):
+        vsx_query = Vizier.query_region(
+            row['Coords'],
+            radius=0.1 * u.deg, 
+            catalog='B/vsx/vsx',
+        )
+
+        PERIOD_THRESHOLD = 0.1
+        
+        period_min = row['Period'] / SECONDS_PER_DAY * (1 - PERIOD_THRESHOLD)
+        period_max = row['Period'] / SECONDS_PER_DAY * (1 + PERIOD_THRESHOLD)
+        
+        results = {
+            'subject_id': [],
+            'VSX Period': [],
+            'VSX Type': [],
+        }
+        for vsx_table in vsx_query:
+            vsx_df = vsx_table.to_pandas()
+            matching_entries = vsx_df[(vsx_df['Period'] >= period_min) & (vsx_df['Period'] <= period_max)]
+            for index, vsx_row in matching_entries.iterrows():
+                results['subject_id'].append(row['subject_id'])
+                results['VSX Period'].append(vsx_row['Period'] * SECONDS_PER_DAY)
+                results['VSX Type'].append(vsx_row['Type'])
+ 
+        return results
+
+    def add_vsx_types(self):
+        self.add_coords()
+        deindexed_df = self.df.reset_index()
+        vsx_results = deindexed_df.apply(
+            lambda r: self._get_vsx_types_for_row(r),
+            axis=1,
+        ).values
+        vsx_results_dict = {}
+        for row in vsx_results:
+            for k, v in row.items():
+                vsx_results_dict.setdefault(k, [])
+                vsx_results_dict[k] += v
+        vsx_types = pandas.DataFrame(vsx_results_dict)
+        self.df = deindexed_df.merge(
+            vsx_types,
+            left_on='subject_id',
+            right_on='subject_id',
+            how='left',
+        ).set_index('subject_id')
+
+
+class FoldedLightcurves(CoordinatesMixin):
     def __init__(self, min_period=0, df=None):
         self.min_period = min_period
         
@@ -182,7 +242,7 @@ class FoldedLightcurves(object):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
 
 
-class AggregatedClassifications(object):
+class AggregatedClassifications(CoordinatesMixin):
     PULSATOR = 1
     EA_EB = 2
     EW = 3
