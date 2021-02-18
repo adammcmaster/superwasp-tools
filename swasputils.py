@@ -13,7 +13,104 @@ DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
 SECONDS_PER_DAY = 60 * 60 * 24
 
 
-class ZooniverseSubjects(object):
+class CoordinatesMixin(object):
+    @property
+    def coords(self):
+        return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
+    
+    def add_coords(self):
+        self.df['Coords'] = self.coords
+    
+    def _get_vsx_types_for_row(self, row):
+        PERIOD_THRESHOLD = 0.1
+        SEARCH_RADIUS = 2 * u.arcsec
+        
+        vsx_query = Vizier.query_region(
+            row['Coords'],
+            radius=SEARCH_RADIUS, 
+            catalog='B/vsx/vsx',
+        )
+        
+        period_min = row['Period'] / SECONDS_PER_DAY * (1 - PERIOD_THRESHOLD)
+        period_max = row['Period'] / SECONDS_PER_DAY * (1 + PERIOD_THRESHOLD)
+        
+        results = {
+            'subject_id': [],
+            'VSX Period': [],
+            'VSX Type': [],
+        }
+        for vsx_table in vsx_query:
+            vsx_df = vsx_table.to_pandas()
+            matching_entries = vsx_df[(vsx_df['Period'] >= period_min) & (vsx_df['Period'] <= period_max)]
+            for index, vsx_row in matching_entries.iterrows():
+                results['subject_id'].append(row['subject_id'])
+                results['VSX Period'].append(vsx_row['Period'] * SECONDS_PER_DAY)
+                results['VSX Type'].append(vsx_row['Type'])
+ 
+        return results
+
+    def add_vsx_types(self):
+        self.add_coords()
+        if self.df.index.name:
+            orig_index_name = self.df.index.name
+            self.df.reset_index(inplace=True)
+        else:
+            orig_index_name = None
+        vsx_results = self.df.apply(
+            lambda r: self._get_vsx_types_for_row(r),
+            axis=1,
+        ).values
+        vsx_results_dict = {}
+        for row in vsx_results:
+            for k, v in row.items():
+                vsx_results_dict.setdefault(k, [])
+                vsx_results_dict[k] += v
+        vsx_types = pandas.DataFrame(vsx_results_dict)
+        self.df = self.df.merge(
+            vsx_types,
+            left_on='subject_id',
+            right_on='subject_id',
+            how='left',
+        )
+        if orig_index_name:
+            self.df.set_index('subject_id', inplace=True)
+
+        
+class ZooLookupMixin(object):
+    @property
+    def zoo_lookup(self):
+        zoo_lookup = pandas.read_csv(
+            os.path.join(DATA_LOCATION, 'lookup.dat'),
+            delim_whitespace=True,
+            header=None,
+        )
+        zoo_lookup.columns = [
+            'subject_id',
+            'SWASP ID',
+            'Period',
+            'Period Number',
+        ]
+        # Period in this file is rounded differently to the others
+        # So drop it here so it doesn't stop us from merging later
+        zoo_lookup.drop('Period', 'columns', inplace=True)
+        return zoo_lookup
+    
+    def merge_zoo_lookup(self):
+        if self.df.index.name:
+            orig_index_name = self.df.index.name
+            self.df.reset_index(inplace=True)
+        else:
+            orig_index_name = None
+                
+        self.df = self.df.merge(
+            self.zoo_lookup,
+            how='left',
+        )
+        if orig_index_name:
+            self.df.set_index(orig_index_name, inplace=True)
+
+
+class ZooniverseSubjects(ZooLookupMixin):
     def __init__(self, df=None):
         if df is not None:
             self.df = df
@@ -21,7 +118,7 @@ class ZooniverseSubjects(object):
         
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
-            index_col='subject_id'
+            index_col='subject_id',
         )
     
     @property
@@ -42,6 +139,13 @@ class ZooniverseSubjects(object):
     @property
     def active(self):
         return self.__class__(df=self.df[self.df['retired_at'].isna()])
+    
+    @property
+    def distinct(self):
+        new_df = self.df.reset_index('subject_id')
+        new_df.drop_duplicates('subject_id', inplace=True)
+        new_df.set_index('subject_id', inplace=True)
+        return self.__class__(df=new_df)
     
     def get_subject_set(self, set_id):
         return self.__class__(df=self.df[self.df['subject_set_id'] == set_id])
@@ -137,63 +241,7 @@ class ZooniverseClassifications(object):
         )
 
 
-class CoordinatesMixin(object):
-    @property
-    def coords(self):
-        return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
-    
-    def add_coords(self):
-        self.df['Coords'] = self.coords
-    
-    def _get_vsx_types_for_row(self, row):
-        vsx_query = Vizier.query_region(
-            row['Coords'],
-            radius=0.1 * u.deg, 
-            catalog='B/vsx/vsx',
-        )
-
-        PERIOD_THRESHOLD = 0.1
-        
-        period_min = row['Period'] / SECONDS_PER_DAY * (1 - PERIOD_THRESHOLD)
-        period_max = row['Period'] / SECONDS_PER_DAY * (1 + PERIOD_THRESHOLD)
-        
-        results = {
-            'subject_id': [],
-            'VSX Period': [],
-            'VSX Type': [],
-        }
-        for vsx_table in vsx_query:
-            vsx_df = vsx_table.to_pandas()
-            matching_entries = vsx_df[(vsx_df['Period'] >= period_min) & (vsx_df['Period'] <= period_max)]
-            for index, vsx_row in matching_entries.iterrows():
-                results['subject_id'].append(row['subject_id'])
-                results['VSX Period'].append(vsx_row['Period'] * SECONDS_PER_DAY)
-                results['VSX Type'].append(vsx_row['Type'])
- 
-        return results
-
-    def add_vsx_types(self):
-        self.add_coords()
-        deindexed_df = self.df.reset_index()
-        vsx_results = deindexed_df.apply(
-            lambda r: self._get_vsx_types_for_row(r),
-            axis=1,
-        ).values
-        vsx_results_dict = {}
-        for row in vsx_results:
-            for k, v in row.items():
-                vsx_results_dict.setdefault(k, [])
-                vsx_results_dict[k] += v
-        vsx_types = pandas.DataFrame(vsx_results_dict)
-        self.df = deindexed_df.merge(
-            vsx_types,
-            left_on='subject_id',
-            right_on='subject_id',
-            how='left',
-        ).set_index('subject_id')
-
-
-class FoldedLightcurves(CoordinatesMixin):
+class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
     def __init__(self, min_period=0, df=None):
         self.min_period = min_period
         
@@ -220,24 +268,6 @@ class FoldedLightcurves(CoordinatesMixin):
         self.df['SWASP ID'] = self.df['SWASP'] + self.df['ID']
         self.df.drop(['Period Flag', 'Camera Number', 'SWASP', 'ID'], 'columns', inplace=True)
 
-        def decode_coords(self):
-            if 'ra' in self.df and 'dec' in self.df:
-                return
-
-            #self.df
-            coords = superwasp_id.replace('1SWASP', '')
-            coords_quoted = urllib.parse.quote(coords)
-            ra = urllib.parse.quote('{}:{}:{}'.format(
-                coords[1:3],
-                coords[3:5],
-                coords[5:10]
-            ))
-            dec = urllib.parse.quote('{}:{}:{}'.format(
-                coords[10:13],
-                coords[13:15],
-                coords[15:]
-            ))
-        
     def get_siblings(self, swasp_id):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
 
@@ -277,6 +307,9 @@ class AggregatedClassifications(CoordinatesMixin):
             'Period Uncertainty',
             'Classification Count',
         ]
+        # Period in this file is rounded differently to the others
+        # So drop it here so it doesn't stop us from merging later
+        self.df.drop('Period', 'columns', inplace=True)
         self.df.set_index('subject_id', inplace=True)
 
     def add_classification_labels(self):
@@ -336,32 +369,17 @@ class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassific
         if not aggregated_classifications:
             aggregated_classifications = AggregatedClassifications()
         
-        self.df = zooniverse_subjects.df.reset_index().merge(
-            self.zoo_lookup,
-            how='left',
-        ).merge(
+        self.df = zooniverse_subjects.df
+        self.merge_zoo_lookup()
+        self.df = self.df.reset_index().merge(
             aggregated_classifications.df.reset_index(),
             how='left',
-        ).merge(
-            folded_lightcurves.df.reset_index(),
-            how='left',
-        ).set_index('subject_id')
-    
-    @property
-    def zoo_lookup(self):
-        zoo_lookup = pandas.read_csv(
-            os.path.join(DATA_LOCATION, 'lookup.dat'),
-            delim_whitespace=True,
-            header=None,
         )
-        zoo_lookup.columns = [
-            'subject_id',
-            'SWASP ID',
-            'Period',
-            'Period Number',
-        ]
-        zoo_lookup.drop('Period', 'columns', inplace=True)
-        return zoo_lookup
+        self.df = self.df.merge(
+            folded_lightcurves.df,
+            how='left',
+        )
+        self.df.set_index('subject_id', inplace=True)
     
     def get_siblings(self, obj_id):
         if type(obj_id) == int:
