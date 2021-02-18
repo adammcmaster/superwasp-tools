@@ -14,6 +14,8 @@ SECONDS_PER_DAY = 60 * 60 * 24
 
 
 class CoordinatesMixin(object):
+    VSX_MAG_AMPLITUDE_FLAG = '('
+    
     @property
     def coords(self):
         return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
@@ -24,6 +26,7 @@ class CoordinatesMixin(object):
     def _get_vsx_types_for_row(self, row):
         PERIOD_THRESHOLD = 0.1
         SEARCH_RADIUS = 2 * u.arcsec
+        MAGNITUDE_LIMIT = 15
         
         vsx_query = Vizier.query_region(
             row['Coords'],
@@ -34,18 +37,42 @@ class CoordinatesMixin(object):
         period_min = row['Period'] / SECONDS_PER_DAY * (1 - PERIOD_THRESHOLD)
         period_max = row['Period'] / SECONDS_PER_DAY * (1 + PERIOD_THRESHOLD)
         
+        result_map = {
+            'VSX Period': 'Period',
+            'VSX Type': 'Type',
+            'VSX Name': 'Name',
+            'VSX Mag Max': 'max',
+            'VSX Mag Min': 'min',
+            'VSX Mag Format': 'f_min',
+        }
+        
         results = {
             'subject_id': [],
-            'VSX Period': [],
-            'VSX Type': [],
         }
+        results.update({k: [] for k in result_map})
+
         for vsx_table in vsx_query:
             vsx_df = vsx_table.to_pandas()
-            matching_entries = vsx_df[(vsx_df['Period'] >= period_min) & (vsx_df['Period'] <= period_max)]
+            
+            matching_entries = vsx_df[
+                (vsx_df['Period'] >= period_min) &
+                (vsx_df['Period'] <= period_max) &
+                (
+                    ( # When max is actually a mean and min is actually an amplitude
+                        (vsx_df['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG) &
+                        ((vsx_df['max'] + vsx_df['min']) <= MAGNITUDE_LIMIT)
+                    ) |
+                    ( # When max and min are actually what their names imply
+                        (vsx_df['f_min'] != self.VSX_MAG_AMPLITUDE_FLAG) &
+                        ((vsx_df['min']) <= MAGNITUDE_LIMIT)
+                    )
+                )
+            ]
+            
             for index, vsx_row in matching_entries.iterrows():
                 results['subject_id'].append(row['subject_id'])
-                results['VSX Period'].append(vsx_row['Period'] * SECONDS_PER_DAY)
-                results['VSX Type'].append(vsx_row['Type'])
+                for result_key, vsx_key in result_map.items():
+                    results[result_key].append(vsx_row[vsx_key])
  
         return results
 
@@ -66,6 +93,7 @@ class CoordinatesMixin(object):
                 vsx_results_dict.setdefault(k, [])
                 vsx_results_dict[k] += v
         vsx_types = pandas.DataFrame(vsx_results_dict)
+        vsx_types['VSX Period'] = vsx_types['VSX Period'] * SECONDS_PER_DAY
         self.df = self.df.merge(
             vsx_types,
             left_on='subject_id',
