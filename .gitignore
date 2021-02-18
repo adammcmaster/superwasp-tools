@@ -129,3 +129,4 @@ dmypy.json
 .pyre/
 
 superwasp-data
+vsx_cache.*

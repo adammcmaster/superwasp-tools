@@ -1,4 +1,5 @@
 import os
+import shelve
 
 import pandas
 import ujson
@@ -15,6 +16,9 @@ SECONDS_PER_DAY = 60 * 60 * 24
 
 class CoordinatesMixin(object):
     VSX_MAG_AMPLITUDE_FLAG = '('
+    VSX_PERIOD_THRESHOLD = 0.1
+    VSX_SEARCH_RADIUS = 2 * u.arcsec
+    VSX_MAGNITUDE_LIMIT = 15
     
     @property
     def coords(self):
@@ -22,20 +26,29 @@ class CoordinatesMixin(object):
     
     def add_coords(self):
         self.df['Coords'] = self.coords
-    
-    def _get_vsx_types_for_row(self, row):
-        PERIOD_THRESHOLD = 0.1
-        SEARCH_RADIUS = 2 * u.arcsec
-        MAGNITUDE_LIMIT = 15
         
-        vsx_query = Vizier.query_region(
-            row['Coords'],
-            radius=SEARCH_RADIUS, 
+    def _query_vsx_for_coord(self, coord, cache=None):
+        if cache is not None:
+            coord_str = coord.to_string()
+            if coord_str in cache:
+                return cache[coord_str]
+            
+        query_result = Vizier.query_region(
+            coord,
+            radius=self.VSX_SEARCH_RADIUS, 
             catalog='B/vsx/vsx',
         )
         
-        period_min = row['Period'] / SECONDS_PER_DAY * (1 - PERIOD_THRESHOLD)
-        period_max = row['Period'] / SECONDS_PER_DAY * (1 + PERIOD_THRESHOLD)
+        if cache is not None:
+            cache[coord_str] = query_result
+        
+        return query_result
+    
+    def _get_vsx_types_for_row(self, row, cache=None):
+        vsx_query = self._query_vsx_for_coord(row['Coords'], cache)
+        
+        period_min = row['Period'] / SECONDS_PER_DAY * (1 - self.VSX_PERIOD_THRESHOLD)
+        period_max = row['Period'] / SECONDS_PER_DAY * (1 + self.VSX_PERIOD_THRESHOLD)
         
         result_map = {
             'VSX Period': 'Period',
@@ -60,11 +73,11 @@ class CoordinatesMixin(object):
                 (
                     ( # When max is actually a mean and min is actually an amplitude
                         (vsx_df['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG) &
-                        ((vsx_df['max'] + vsx_df['min']) <= MAGNITUDE_LIMIT)
+                        ((vsx_df['max'] + vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
                     ) |
                     ( # When max and min are actually what their names imply
                         (vsx_df['f_min'] != self.VSX_MAG_AMPLITUDE_FLAG) &
-                        ((vsx_df['min']) <= MAGNITUDE_LIMIT)
+                        ((vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
                     )
                 )
             ]
@@ -83,10 +96,13 @@ class CoordinatesMixin(object):
             self.df.reset_index(inplace=True)
         else:
             orig_index_name = None
-        vsx_results = self.df.apply(
-            lambda r: self._get_vsx_types_for_row(r),
-            axis=1,
-        ).values
+            
+        with shelve.open('vsx_cache') as cache:
+            vsx_results = self.df.apply(
+                lambda r: self._get_vsx_types_for_row(r, cache=cache),
+                axis=1,
+            ).values
+
         vsx_results_dict = {}
         for row in vsx_results:
             for k, v in row.items():
