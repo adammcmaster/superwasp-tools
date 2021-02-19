@@ -1,4 +1,5 @@
 import os
+import pathlib
 import shelve
 
 import pandas
@@ -11,7 +12,22 @@ from astroquery.vizier import Vizier
 
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
+CACHE_LOCATION = os.path.join(DATA_LOCATION, 'cache')
+
 SECONDS_PER_DAY = 60 * 60 * 24
+
+if not os.path.exists(DATA_LOCATION):
+    os.mkdir(DATA_LOCATION)
+if not os.path.exists(CACHE_LOCATION):
+    os.mkdir(CACHE_LOCATION)
+
+
+def cached_pandas_load(filename):
+    cache_file_path = pathlib.Path(os.path.join(CACHE_LOCATION, '{}.pickle'.format(filename)))
+    orig_file_path = pathlib.Path(os.path.join(DATA_LOCATION, filename))
+    if cache_file_path.exists() and cache_file_path.stat().st_mtime > orig_file_path.stat().st_mtime:
+        return (pandas.read_pickle(cache_file_path), cache_file_path)
+    return (None, cache_file_path)
 
 
 class CoordinatesMixin(object):
@@ -97,7 +113,7 @@ class CoordinatesMixin(object):
         else:
             orig_index_name = None
             
-        with shelve.open('vsx_cache') as cache:
+        with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as cache:
             vsx_results = self.df.apply(
                 lambda r: self._get_vsx_types_for_row(r, cache=cache),
                 axis=1,
@@ -123,6 +139,10 @@ class CoordinatesMixin(object):
 class ZooLookupMixin(object):
     @property
     def zoo_lookup(self):
+        zoo_lookup, cache_file = cached_pandas_load('lookup.dat')
+        if zoo_lookup is not None:
+            return zoo_lookup
+        
         zoo_lookup = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'lookup.dat'),
             delim_whitespace=True,
@@ -137,6 +157,7 @@ class ZooLookupMixin(object):
         # Period in this file is rounded differently to the others
         # So drop it here so it doesn't stop us from merging later
         zoo_lookup.drop('Period', 'columns', inplace=True)
+        zoo_lookup.to_pickle(cache_file)
         return zoo_lookup
     
     def merge_zoo_lookup(self):
@@ -159,11 +180,16 @@ class ZooniverseSubjects(ZooLookupMixin):
         if df is not None:
             self.df = df
             return
+
+        self.df, cache_file = cached_pandas_load('superwasp-variable-stars-subjects.csv')
+        if self.df is not None:
+            return
         
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
             index_col='subject_id',
         )
+        self.df.to_pickle(cache_file)
     
     @property
     def subject_sets(self):
@@ -219,13 +245,20 @@ class ZooniverseClassifications(object):
         if df is not None:
             self.df = df
             return
-        
-        self.df = pandas.read_csv(
-            os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
-            index_col='classification_id',
-        )
-        if drop_duplicates:
-            self.df.drop_duplicates(duplicate_columns, inplace=True)
+
+        try:
+            self.df, cache_file = cached_pandas_load('superwasp-variable-stars-classifications.csv')
+            if self.df is not None:
+                return
+
+            self.df = pandas.read_csv(
+                os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
+                index_col='classification_id',
+            )
+            self.df.to_pickle(cache_file)
+        finally:
+            if drop_duplicates:
+                self.df.drop_duplicates(duplicate_columns, inplace=True)
     
     @property
     def workflows(self):
@@ -293,6 +326,10 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
             self.df = df
             return
         
+        self.df, cache_file = cached_pandas_load('results_total.dat')
+        if self.df is not None:
+            return
+        
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'results_total.dat'),
             delim_whitespace=True,
@@ -311,6 +348,7 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
         self.df = self.df[(self.df['Period Flag'] == 0) & (self.df['Period'] >= min_period)]
         self.df['SWASP ID'] = self.df['SWASP'] + self.df['ID']
         self.df.drop(['Period Flag', 'Camera Number', 'SWASP', 'ID'], 'columns', inplace=True)
+        self.df.to_pickle(cache_file)
 
     def get_siblings(self, swasp_id):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
@@ -336,6 +374,10 @@ class AggregatedClassifications(CoordinatesMixin):
         if df is not None:
             self.df = df
             return
+        
+        self.df, cache_file = cached_pandas_load('class_top.csv')
+        if self.df is not None:
+            return
 
         self.df = pandas.read_csv(
             os.path.join(DATA_LOCATION, 'class_top.csv'),
@@ -355,6 +397,7 @@ class AggregatedClassifications(CoordinatesMixin):
         # So drop it here so it doesn't stop us from merging later
         self.df.drop('Period', 'columns', inplace=True)
         self.df.set_index('subject_id', inplace=True)
+        self.df.to_pickle(cache_file)
 
     def add_classification_labels(self):
         self.df = self.df.copy()
