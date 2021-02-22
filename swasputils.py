@@ -121,29 +121,32 @@ class CoordinatesMixin(object):
         return results
 
     def add_vsx_types(self):
-        if self.df.index.name:
-            orig_index_name = self.df.index.name
-            self.df.reset_index(inplace=True)
-        else:
-            orig_index_name = None
+        vsx_types, vsx_types_cache_file = cached_pandas_load('vsx_types')
+        if vsx_types is None:
+            if self.df.index.name:
+                orig_index_name = self.df.index.name
+                self.df.reset_index(inplace=True)
+            else:
+                orig_index_name = None
 
-        vsx_results_dict = {}
-        batch_size = 100
-        for i, subset_df in enumerate(batches(self.df, batch_size=batch_size), start=1):
-            print('Processing batch: {} ({} rows)'.format(i, i * batch_size), end='\r')
-            with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as vsx_cache:
-                with shelve.open(os.path.join(CACHE_LOCATION, 'coord_cache')) as coord_cache:
-                    vsx_results = subset_df.apply(
-                        lambda r: self._get_vsx_types_for_row(r, vsx_cache=vsx_cache, coord_cache=coord_cache),
-                        axis=1,
-                    ).values
+            vsx_results_dict = {}
+            batch_size = 100
+            for i, subset_df in enumerate(batches(self.df, batch_size=batch_size), start=1):
+                print('Processing batch: {} ({} rows)'.format(i, i * batch_size), end='\r')
+                with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as vsx_cache:
+                    with shelve.open(os.path.join(CACHE_LOCATION, 'coord_cache')) as coord_cache:
+                        vsx_results = subset_df.apply(
+                            lambda r: self._get_vsx_types_for_row(r, vsx_cache=vsx_cache, coord_cache=coord_cache),
+                            axis=1,
+                        ).values
 
-            for row in vsx_results:
-                for k, v in row.items():
-                    vsx_results_dict.setdefault(k, [])
-                    vsx_results_dict[k] += v
+                for row in vsx_results:
+                    for k, v in row.items():
+                        vsx_results_dict.setdefault(k, [])
+                        vsx_results_dict[k] += v
 
-        vsx_types = pandas.DataFrame(vsx_results_dict)
+            vsx_types = pandas.DataFrame(vsx_results_dict)
+            vsx_types.to_pickle(vsx_types_cache_file)
 
         if len(vsx_types.index) > 0:
             vsx_types['VSX Period'] = vsx_types['VSX Period'] * SECONDS_PER_DAY
