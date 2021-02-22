@@ -30,6 +30,14 @@ def cached_pandas_load(filename):
     return (None, cache_file_path)
 
 
+def batches(i, batch_size=100):
+    for x in range(int(len(i)/batch_size)+1):
+        subset = i[x*batch_size:(x+1)*batch_size]
+        if len(subset) == 0:
+            return
+        yield subset
+
+
 class CoordinatesMixin(object):
     VSX_MAG_AMPLITUDE_FLAG = '('
     VSX_PERIOD_THRESHOLD = 0.1
@@ -41,27 +49,34 @@ class CoordinatesMixin(object):
         return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
     
     def add_coords(self):
-        self.df['Coords'] = self.coords
+        if 'Coords' not in self.df:
+            self.df['Coords'] = self.coords
         
-    def _query_vsx_for_coord(self, coord, cache=None):
-        if cache is not None:
-            coord_str = coord.to_string()
-            if coord_str in cache:
-                return cache[coord_str]
-            
-        query_result = Vizier.query_region(
-            coord,
-            radius=self.VSX_SEARCH_RADIUS, 
-            catalog='B/vsx/vsx',
-        )
-        
-        if cache is not None:
-            cache[coord_str] = query_result
-        
-        return query_result
+    def _query_vsx_for_coord(self, coord, cache):
+        coord_str = coord.to_string()
+        if coord_str not in cache:
+            cache[coord_str] = Vizier.query_region(
+                coord,
+                radius=self.VSX_SEARCH_RADIUS, 
+                catalog='B/vsx/vsx',
+            )
+
+        return cache[coord_str]
     
-    def _get_vsx_types_for_row(self, row, cache=None):
-        vsx_query = self._query_vsx_for_coord(row['Coords'], cache)
+    def _coords_for_row(self, row, cache):
+        if row['SWASP ID'] not in cache:
+            cache[row['SWASP ID']] = SkyCoord(
+                row['SWASP ID'].replace('1SWASP', ''),
+                unit=(u.hour, u.deg)
+            )
+        
+        return cache[row['SWASP ID']]
+    
+    def _get_vsx_types_for_row(self, row, vsx_cache, coord_cache):
+        vsx_query = self._query_vsx_for_coord(
+            self._coords_for_row(row, coord_cache),
+            vsx_cache
+        )
         
         period_min = row['Period'] / SECONDS_PER_DAY * (1 - self.VSX_PERIOD_THRESHOLD)
         period_max = row['Period'] / SECONDS_PER_DAY * (1 + self.VSX_PERIOD_THRESHOLD)
@@ -106,32 +121,39 @@ class CoordinatesMixin(object):
         return results
 
     def add_vsx_types(self):
-        self.add_coords()
         if self.df.index.name:
             orig_index_name = self.df.index.name
             self.df.reset_index(inplace=True)
         else:
             orig_index_name = None
-            
-        with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as cache:
-            vsx_results = self.df.apply(
-                lambda r: self._get_vsx_types_for_row(r, cache=cache),
-                axis=1,
-            ).values
 
         vsx_results_dict = {}
-        for row in vsx_results:
-            for k, v in row.items():
-                vsx_results_dict.setdefault(k, [])
-                vsx_results_dict[k] += v
+        batch_size = 100
+        for i, subset_df in enumerate(batches(self.df, batch_size=batch_size), start=1):
+            print('Processing batch: {} ({} rows)'.format(i, i * batch_size), end='\r')
+            with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as vsx_cache:
+                with shelve.open(os.path.join(CACHE_LOCATION, 'coord_cache')) as coord_cache:
+                    vsx_results = subset_df.apply(
+                        lambda r: self._get_vsx_types_for_row(r, vsx_cache=vsx_cache, coord_cache=coord_cache),
+                        axis=1,
+                    ).values
+
+            for row in vsx_results:
+                for k, v in row.items():
+                    vsx_results_dict.setdefault(k, [])
+                    vsx_results_dict[k] += v
+
         vsx_types = pandas.DataFrame(vsx_results_dict)
-        vsx_types['VSX Period'] = vsx_types['VSX Period'] * SECONDS_PER_DAY
-        self.df = self.df.merge(
-            vsx_types,
-            left_on='subject_id',
-            right_on='subject_id',
-            how='left',
-        )
+
+        if len(vsx_types.index) > 0:
+            vsx_types['VSX Period'] = vsx_types['VSX Period'] * SECONDS_PER_DAY
+            self.df = self.df.merge(
+                vsx_types,
+                left_on='subject_id',
+                right_on='subject_id',
+                how='left',
+            )
+
         if orig_index_name:
             self.df.set_index('subject_id', inplace=True)
 
@@ -181,7 +203,7 @@ class ZooniverseSubjects(ZooLookupMixin):
             self.df = df
             return
 
-        self.df, cache_file = cached_pandas_load('superwasp-variable-stars-subjects.csv')
+        self.df, self.cache_file = cached_pandas_load('superwasp-variable-stars-subjects.csv')
         if self.df is not None:
             return
         
@@ -189,7 +211,7 @@ class ZooniverseSubjects(ZooLookupMixin):
             os.path.join(DATA_LOCATION, 'superwasp-variable-stars-subjects.csv'),
             index_col='subject_id',
         )
-        self.df.to_pickle(cache_file)
+        self.df.to_pickle(self.cache_file)
     
     @property
     def subject_sets(self):
@@ -247,7 +269,7 @@ class ZooniverseClassifications(object):
             return
 
         try:
-            self.df, cache_file = cached_pandas_load('superwasp-variable-stars-classifications.csv')
+            self.df, self.cache_file = cached_pandas_load('superwasp-variable-stars-classifications.csv')
             if self.df is not None:
                 return
 
@@ -255,7 +277,7 @@ class ZooniverseClassifications(object):
                 os.path.join(DATA_LOCATION, 'superwasp-variable-stars-classifications.csv'),
                 index_col='classification_id',
             )
-            self.df.to_pickle(cache_file)
+            self.df.to_pickle(self.cache_file)
         finally:
             if drop_duplicates:
                 self.df.drop_duplicates(duplicate_columns, inplace=True)
@@ -326,7 +348,7 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
             self.df = df
             return
         
-        self.df, cache_file = cached_pandas_load('results_total.dat')
+        self.df, self.cache_file = cached_pandas_load('results_total.dat')
         if self.df is not None:
             return
         
@@ -348,7 +370,7 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
         self.df = self.df[(self.df['Period Flag'] == 0) & (self.df['Period'] >= min_period)]
         self.df['SWASP ID'] = self.df['SWASP'] + self.df['ID']
         self.df.drop(['Period Flag', 'Camera Number', 'SWASP', 'ID'], 'columns', inplace=True)
-        self.df.to_pickle(cache_file)
+        self.df.to_pickle(self.cache_file)
 
     def get_siblings(self, swasp_id):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
@@ -375,7 +397,7 @@ class AggregatedClassifications(CoordinatesMixin):
             self.df = df
             return
         
-        self.df, cache_file = cached_pandas_load('class_top.csv')
+        self.df, self.cache_file = cached_pandas_load('class_top.csv')
         if self.df is not None:
             return
 
@@ -397,7 +419,7 @@ class AggregatedClassifications(CoordinatesMixin):
         # So drop it here so it doesn't stop us from merging later
         self.df.drop('Period', 'columns', inplace=True)
         self.df.set_index('subject_id', inplace=True)
-        self.df.to_pickle(cache_file)
+        self.df.to_pickle(self.cache_file)
 
     def add_classification_labels(self):
         self.df = self.df.copy()
