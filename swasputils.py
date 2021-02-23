@@ -76,51 +76,7 @@ class CoordinatesMixin(object):
             )
         
         return cache[row['SWASP ID']]
-    
-    def _get_vsx_types_for_row(self, row, results, vsx_cache, coord_cache):
-        vsx_query = self._query_vsx_for_coord(
-            self._coords_for_row(row, coord_cache),
-            vsx_cache
-        )
-        
-        period_min = row['Period'] / SECONDS_PER_DAY * (1 - self.VSX_PERIOD_THRESHOLD)
-        period_max = row['Period'] / SECONDS_PER_DAY * (1 + self.VSX_PERIOD_THRESHOLD)
-        
-        result_map = {
-            'VSX Period': 'Period',
-            'VSX Type': 'Type',
-            'VSX Name': 'Name',
-            'VSX Mag Max': 'max',
-            'VSX Mag Min': 'min',
-            'VSX Mag Format': 'f_min',
-        }
-
-        if vsx_query is not None:
-            for vsx_table in vsx_query:
-                vsx_df = vsx_table.to_pandas()
-
-                matching_entries = vsx_df[
-                    (vsx_df['Period'] >= period_min) &
-                    (vsx_df['Period'] <= period_max) &
-                    (
-                        ( # When max is actually a mean and min is actually an amplitude
-                            (vsx_df['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG) &
-                            ((vsx_df['max'] + vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
-                        ) |
-                        ( # When max and min are actually what their names imply
-                            (vsx_df['f_min'] != self.VSX_MAG_AMPLITUDE_FLAG) &
-                            ((vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
-                        )
-                    )
-                ]
-
-                for index, vsx_row in matching_entries.iterrows():
-                    results['subject_id'].append(row['subject_id'])
-                    for result_key, vsx_key in result_map.items():
-                        results[result_key].append(vsx_row[vsx_key])
  
-        return results
-
     def add_vsx_types(self):
         if self.df.index.name:
             orig_index_name = self.df.index.name
@@ -132,19 +88,48 @@ class CoordinatesMixin(object):
         if vsx_types is None:
             vsx_results_dict = defaultdict(list)
             batch_size = 100
+            result_map = {
+                'VSX Period': 'Period',
+                'VSX Type': 'Type',
+                'VSX Name': 'Name',
+                'VSX Mag Max': 'max',
+                'VSX Mag Min': 'min',
+                'VSX Mag Format': 'f_min',
+            }
+
             with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as vsx_cache:
                 with shelve.open(os.path.join(CACHE_LOCATION, 'coord_cache')) as coord_cache:
-                    for i, subset_df in enumerate(batches(self.df, batch_size=batch_size), start=1):
-                        print('Processing batch: {} ({} rows)'.format(i, i * batch_size), end='\r')
-                        vsx_results = subset_df.apply(
-                            lambda r: self._get_vsx_types_for_row(
-                                r, 
-                                vsx_cache=vsx_cache, 
-                                coord_cache=coord_cache,
-                                results=vsx_results_dict,
-                            ),
-                            axis=1,
-                        ).values
+                    for i, (_, row) in enumerate(self.df.iterrows(), start=1):
+                        if i % 100 == 0:
+                            print('Processing row: {}'.format(i), end='\r')
+                        vsx_query = self._query_vsx_for_coord(
+                            self._coords_for_row(row, coord_cache),
+                            vsx_cache
+                        )
+                        if vsx_query is None:
+                            continue
+
+                        period_min = (row['Period'] / SECONDS_PER_DAY) * (1 - self.VSX_PERIOD_THRESHOLD)
+                        period_max = (row['Period'] / SECONDS_PER_DAY) * (1 + self.VSX_PERIOD_THRESHOLD)
+
+                        for vsx_table in vsx_query:
+                            for vsx_row in vsx_table:
+                                if vsx_row['Period'] < period_min:
+                                    continue
+                                if vsx_row['Period'] > period_max:
+                                    continue
+                                
+                                # When max is actually a mean and min is actually an amplitude
+                                if vsx_row['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG:
+                                    if (vsx_row['max'] + vsx_row['min']) > self.VSX_MAGNITUDE_LIMIT:
+                                        continue
+                                else:
+                                    if vsx_row['min'] > self.VSX_MAGNITUDE_LIMIT:
+                                        continue
+
+                                vsx_results_dict['subject_id'].append(row['subject_id'])
+                                for result_key, vsx_key in result_map.items():
+                                    vsx_results_dict[result_key].append(vsx_row[vsx_key])
 
             vsx_types = pandas.DataFrame(vsx_results_dict)
             vsx_types.to_pickle(vsx_types_cache_file)
