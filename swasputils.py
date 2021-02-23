@@ -95,28 +95,29 @@ class CoordinatesMixin(object):
         }
         results.update({k: [] for k in result_map})
 
-        for vsx_table in vsx_query:
-            vsx_df = vsx_table.to_pandas()
-            
-            matching_entries = vsx_df[
-                (vsx_df['Period'] >= period_min) &
-                (vsx_df['Period'] <= period_max) &
-                (
-                    ( # When max is actually a mean and min is actually an amplitude
-                        (vsx_df['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG) &
-                        ((vsx_df['max'] + vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
-                    ) |
-                    ( # When max and min are actually what their names imply
-                        (vsx_df['f_min'] != self.VSX_MAG_AMPLITUDE_FLAG) &
-                        ((vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
+        if vsx_query is not None:
+            for vsx_table in vsx_query:
+                vsx_df = vsx_table.to_pandas()
+
+                matching_entries = vsx_df[
+                    (vsx_df['Period'] >= period_min) &
+                    (vsx_df['Period'] <= period_max) &
+                    (
+                        ( # When max is actually a mean and min is actually an amplitude
+                            (vsx_df['f_min'] == self.VSX_MAG_AMPLITUDE_FLAG) &
+                            ((vsx_df['max'] + vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
+                        ) |
+                        ( # When max and min are actually what their names imply
+                            (vsx_df['f_min'] != self.VSX_MAG_AMPLITUDE_FLAG) &
+                            ((vsx_df['min']) <= self.VSX_MAGNITUDE_LIMIT)
+                        )
                     )
-                )
-            ]
-            
-            for index, vsx_row in matching_entries.iterrows():
-                results['subject_id'].append(row['subject_id'])
-                for result_key, vsx_key in result_map.items():
-                    results[result_key].append(vsx_row[vsx_key])
+                ]
+
+                for index, vsx_row in matching_entries.iterrows():
+                    results['subject_id'].append(row['subject_id'])
+                    for result_key, vsx_key in result_map.items():
+                        results[result_key].append(vsx_row[vsx_key])
  
         return results
 
