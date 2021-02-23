@@ -5,6 +5,8 @@ import shelve
 import pandas
 import ujson
 
+from collections import defaultdict 
+
 from IPython.display import Image, display
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -75,7 +77,7 @@ class CoordinatesMixin(object):
         
         return cache[row['SWASP ID']]
     
-    def _get_vsx_types_for_row(self, row, vsx_cache, coord_cache):
+    def _get_vsx_types_for_row(self, row, results, vsx_cache, coord_cache):
         vsx_query = self._query_vsx_for_coord(
             self._coords_for_row(row, coord_cache),
             vsx_cache
@@ -92,11 +94,6 @@ class CoordinatesMixin(object):
             'VSX Mag Min': 'min',
             'VSX Mag Format': 'f_min',
         }
-        
-        results = {
-            'subject_id': [],
-        }
-        results.update({k: [] for k in result_map})
 
         if vsx_query is not None:
             for vsx_table in vsx_query:
@@ -133,21 +130,21 @@ class CoordinatesMixin(object):
 
         vsx_types, vsx_types_cache_file = cached_pandas_load('vsx_types')
         if vsx_types is None:
-            vsx_results_dict = {}
+            vsx_results_dict = defaultdict(list)
             batch_size = 100
             with shelve.open(os.path.join(CACHE_LOCATION, 'vsx_cache')) as vsx_cache:
                 with shelve.open(os.path.join(CACHE_LOCATION, 'coord_cache')) as coord_cache:
                     for i, subset_df in enumerate(batches(self.df, batch_size=batch_size), start=1):
                         print('Processing batch: {} ({} rows)'.format(i, i * batch_size), end='\r')
                         vsx_results = subset_df.apply(
-                            lambda r: self._get_vsx_types_for_row(r, vsx_cache=vsx_cache, coord_cache=coord_cache),
+                            lambda r: self._get_vsx_types_for_row(
+                                r, 
+                                vsx_cache=vsx_cache, 
+                                coord_cache=coord_cache,
+                                results=vsx_results_dict,
+                            ),
                             axis=1,
                         ).values
-
-                        for row in vsx_results:
-                            for k, v in row.items():
-                                vsx_results_dict.setdefault(k, [])
-                                vsx_results_dict[k] += v
 
             vsx_types = pandas.DataFrame(vsx_results_dict)
             vsx_types.to_pickle(vsx_types_cache_file)
