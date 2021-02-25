@@ -75,13 +75,7 @@ class CoordinatesMixin(object):
     @property
     def fits(self):
         for swasp_id, url in zip(self.df['SWASP ID'], self.fits_urls):
-            fits_path = pathlib.Path(os.path.join(CACHE_LOCATION, '{}.fits'.format(swasp_id)))
-            if fits_path.exists():
-                yield fits.open(fits_path)
-            else:
-                fits_data = fits.open(url)
-                fits_data.writeto(fits_path)
-                yield fits_data
+            yield fits.open(url)
             
     @property
     def timeseries(self):
