@@ -13,11 +13,14 @@ from IPython.display import Image, display
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 import astropy.io.fits as fits
+import astropy.utils.data
 from astropy.timeseries import TimeSeries
 
 from astroquery.vizier import Vizier
 
 import matplotlib.pyplot as plt
+
+astropy.utils.data.Conf.remote_timeout.set(60)
 
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
