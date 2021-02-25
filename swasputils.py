@@ -4,19 +4,29 @@ import shelve
 
 import pandas
 import ujson
+import urllib
 
 from collections import defaultdict 
 
 from IPython.display import Image, display
+
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+import astropy.io.fits as fits
+from astropy.timeseries import TimeSeries
+
 from astroquery.vizier import Vizier
+
+import matplotlib.pyplot as plt
 
 
 DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
 CACHE_LOCATION = os.path.join(DATA_LOCATION, 'cache')
 
 SECONDS_PER_DAY = 60 * 60 * 24
+
+MAIN_WORKFLOW = 7534
+JUNK_WORKFLOW = 17313
 
 if not os.path.exists(DATA_LOCATION):
     os.mkdir(DATA_LOCATION)
@@ -53,11 +63,64 @@ class CoordinatesMixin(object):
     def coords(self):
         return SkyCoord(self.df['SWASP ID'].replace(r'^1SWASP', '', regex=True).values, unit=(u.hour, u.deg))
     
+    @property
+    def fits_urls(self):
+        return self.df['SWASP ID'].apply(lambda s: 'http://wasp.warwick.ac.uk/lcextract?{}'.format(
+            urllib.parse.urlencode(
+                {'objid': s.replace('1SWASP', '1SWASP ')},
+                quote_via=urllib.parse.quote,
+            )
+        ))
+    
+    @property
+    def fits(self):
+        for swasp_id, url in zip(self.df['SWASP ID'], self.fits_urls):
+            fits_path = pathlib.Path(os.path.join(CACHE_LOCATION, '{}.fits'.format(swasp_id)))
+            if fits_path.exists():
+                yield fits.open(fits_path)
+            else:
+                fits_data = fits.open(url)
+                fits_data.writeto(fits_path)
+                yield fits_data
+            
+    @property
+    def timeseries(self):
+        for fits_file in self.fits:
+            hjd_col = fits.Column(name='HJD', format='D', array=fits_file[1].data['TMID']/86400 + 2453005.5)
+            lc_data = fits.BinTableHDU.from_columns(fits_file[1].data.columns + fits.ColDefs([hjd_col]))
+            yield TimeSeries.read(lc_data, time_column='HJD', time_format='jd')
+            
+    @property
+    def timeseries_folded(self):
+        for period, timeseries in zip(self.df['Period'], self.timeseries):
+            yield timeseries.fold(period=period * u.second)
+    
     def add_coords(self):
         if 'Coords' not in self.df:
             coords = self.coords
             self.df['_RAJ2000'] = coords.ra
             self.df['_DEJ2000'] = coords.dec
+            
+    def add_fits_urls(self):
+        if 'FITS URL' not in self.df:
+            self.df['FITS URL'] = self.fits_urls
+    
+    def plot(self):
+        plotted_ids = set()
+        for (subject_id, row), ts in zip(self.df.iterrows(), self.timeseries):
+            if row['SWASP ID'] in plotted_ids:
+                continue
+            plotted_ids.add(row['SWASP ID'])
+            f = plt.figure()
+            plt.title(row['SWASP ID'])
+            plt.plot(ts.time.jd, ts['TAMFLUX2'], 'k.', markersize=1)
+    
+    def plot_folded(self):
+        self.add_classification_labels()
+        for (subject_id, row), ts_folded in zip(self.df.iterrows(), self.timeseries_folded):
+            f = plt.figure()
+            plt.title('{} Period {}s ({})'.format(row['SWASP ID'], row['Period'], row['Classification Label']))
+            plt.plot(ts_folded.time.jd, ts_folded['TAMFLUX2'], 'k.', markersize=1)
         
     def _query_vsx_for_coord(self, coord, cache):
         coord_str = coord.to_string()
@@ -242,11 +305,11 @@ class ZooniverseSubjects(ZooLookupMixin):
             lambda s: ujson.loads(s)[str(index)]
         )
     
-    def display_lightcurves(self, col='lightcurve'):
+    def display_lightcurves(self, col='lightcurve', start=0, end=None):
         if col not in self.df:
             self.decode_locations(target=col)
             
-        self.df[col].apply(
+        self.df[col][start:end].apply(
             lambda s: display(Image(url=s, width=500, height=500))
         )
 
