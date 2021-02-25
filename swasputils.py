@@ -55,7 +55,9 @@ class CoordinatesMixin(object):
     
     def add_coords(self):
         if 'Coords' not in self.df:
-            self.df['Coords'] = self.coords
+            coords = self.coords
+            self.df['_RAJ2000'] = coords.ra
+            self.df['_DEJ2000'] = coords.dec
         
     def _query_vsx_for_coord(self, coord, cache):
         coord_str = coord.to_string()
