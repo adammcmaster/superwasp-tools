@@ -38,17 +38,6 @@ if not os.path.exists(CACHE_LOCATION):
     os.mkdir(CACHE_LOCATION)
 
 
-def cached_pandas_load(filename):
-    cache_file_path = pathlib.Path(os.path.join(CACHE_LOCATION, '{}.pickle'.format(filename)))
-    orig_file_path = pathlib.Path(os.path.join(DATA_LOCATION, filename))
-    if cache_file_path.exists() and (
-        not orig_file_path.exists() or
-        cache_file_path.stat().st_mtime > orig_file_path.stat().st_mtime
-    ):
-        return (pandas.read_pickle(cache_file_path), cache_file_path)
-    return (None, cache_file_path)
-
-
 def batches(i, batch_size=100):
     for x in range(int(len(i)/batch_size)+1):
         subset = i[x*batch_size:(x+1)*batch_size]
@@ -56,6 +45,21 @@ def batches(i, batch_size=100):
             return
         yield subset
 
+
+class PandasDFWrapper(object):
+    def limit(self, limit):
+        return self.__class__(df=self.df[:limit])
+    
+    def cached_pandas_load(self, filename):
+        cache_file_path = pathlib.Path(os.path.join(CACHE_LOCATION, '{}.pickle'.format(filename)))
+        orig_file_path = pathlib.Path(os.path.join(DATA_LOCATION, filename))
+        if cache_file_path.exists() and (
+            not orig_file_path.exists() or
+            cache_file_path.stat().st_mtime > orig_file_path.stat().st_mtime
+        ):
+            return (pandas.read_pickle(cache_file_path), cache_file_path)
+        return (None, cache_file_path)
+        
 
 class CoordinatesMixin(object):
     VSX_MAG_AMPLITUDE_FLAG = '('
@@ -106,6 +110,8 @@ class CoordinatesMixin(object):
     def plot(self, folded=False, clip=False, sigma=4):
         if folded:
             self.add_classification_labels()
+            if 'Period' not in self.df:
+                self.df = self.df.merge(FoldedLightcurves().df, how='left')
             ts_iter = self.timeseries_folded
         else:
             plotted_ids = set()
@@ -158,7 +164,7 @@ class CoordinatesMixin(object):
         else:
             orig_index_name = None
 
-        vsx_types, vsx_types_cache_file = cached_pandas_load('vsx_types')
+        vsx_types, vsx_types_cache_file = self.cached_pandas_load('vsx_types')
         if vsx_types is None:
             vsx_results_dict = defaultdict(list)
             batch_size = 100
@@ -224,7 +230,7 @@ class CoordinatesMixin(object):
 class ZooLookupMixin(object):
     @property
     def zoo_lookup(self):
-        zoo_lookup, cache_file = cached_pandas_load('lookup.dat')
+        zoo_lookup, cache_file = self.cached_pandas_load('lookup.dat')
         if zoo_lookup is not None:
             return zoo_lookup
         
@@ -260,13 +266,13 @@ class ZooLookupMixin(object):
             self.df.set_index(orig_index_name, inplace=True)
 
 
-class ZooniverseSubjects(ZooLookupMixin):
+class ZooniverseSubjects(PandasDFWrapper, ZooLookupMixin):
     def __init__(self, df=None):
         if df is not None:
             self.df = df
             return
 
-        self.df, self.cache_file = cached_pandas_load('superwasp-variable-stars-subjects.csv')
+        self.df, self.cache_file = self.cached_pandas_load('superwasp-variable-stars-subjects.csv')
         if self.df is not None:
             return
         
@@ -323,7 +329,7 @@ class ZooniverseSubjects(ZooLookupMixin):
         )
 
 
-class ZooniverseClassifications(object):
+class ZooniverseClassifications(PandasDFWrapper):
     ANNOTATION_PREFIX = 'annotation_'
     
     def __init__(self, df=None, drop_duplicates=False, duplicate_columns=('subject_ids', 'user_id')):
@@ -332,7 +338,7 @@ class ZooniverseClassifications(object):
             return
 
         try:
-            self.df, self.cache_file = cached_pandas_load('superwasp-variable-stars-classifications.csv')
+            self.df, self.cache_file = self.cached_pandas_load('superwasp-variable-stars-classifications.csv')
             if self.df is not None:
                 return
 
@@ -403,7 +409,7 @@ class ZooniverseClassifications(object):
         )
 
 
-class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
+class FoldedLightcurves(PandasDFWrapper, CoordinatesMixin, ZooLookupMixin):
     def __init__(self, min_period=0, df=None):
         self.min_period = min_period
         
@@ -411,7 +417,7 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
             self.df = df
             return
         
-        self.df, self.cache_file = cached_pandas_load('results_total.dat')
+        self.df, self.cache_file = self.cached_pandas_load('results_total.dat')
         if self.df is not None:
             return
         
@@ -439,7 +445,7 @@ class FoldedLightcurves(CoordinatesMixin, ZooLookupMixin):
         return self.__class__(df=self.df[self.df['SWASP ID'] == swasp_id], min_period=self.min_period)
 
 
-class AggregatedClassifications(CoordinatesMixin):
+class AggregatedClassifications(PandasDFWrapper, CoordinatesMixin):
     PULSATOR = 1
     EA_EB = 2
     EW = 3
@@ -460,7 +466,7 @@ class AggregatedClassifications(CoordinatesMixin):
             self.df = df
             return
         
-        self.df, self.cache_file = cached_pandas_load('class_top.csv')
+        self.df, self.cache_file = self.cached_pandas_load('class_top.csv')
         if self.df is not None:
             return
 
