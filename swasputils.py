@@ -15,6 +15,7 @@ from astropy import units as u
 import astropy.io.fits as fits
 import astropy.utils.data
 from astropy.timeseries import TimeSeries
+from astropy.stats import sigma_clip
 
 from astroquery.vizier import Vizier
 
@@ -102,22 +103,33 @@ class CoordinatesMixin(object):
         if 'FITS URL' not in self.df:
             self.df['FITS URL'] = self.fits_urls
     
-    def plot(self):
-        plotted_ids = set()
-        for (subject_id, row), ts in zip(self.df.iterrows(), self.timeseries):
-            if row['SWASP ID'] in plotted_ids:
-                continue
-            plotted_ids.add(row['SWASP ID'])
-            f = plt.figure()
-            plt.title(row['SWASP ID'])
-            plt.plot(ts.time.jd, ts['TAMFLUX2'], 'k.', markersize=1)
-    
-    def plot_folded(self):
-        self.add_classification_labels()
-        for (subject_id, row), ts_folded in zip(self.df.iterrows(), self.timeseries_folded):
-            f = plt.figure()
-            plt.title('{} Period {}s ({})'.format(row['SWASP ID'], row['Period'], row['Classification Label']))
-            plt.plot(ts_folded.time.jd, ts_folded['TAMFLUX2'], 'k.', markersize=1)
+    def plot(self, folded=False, clip=False, sigma=4):
+        if folded:
+            self.add_classification_labels()
+            ts_iter = self.timeseries_folded
+        else:
+            plotted_ids = set()
+            ts_iter = self.timeseries
+
+        for (subject_id, row), ts in zip(self.df.iterrows(), ts_iter):
+            if not folded:
+                if row['SWASP ID'] in plotted_ids:
+                    continue
+                plotted_ids.add(row['SWASP ID'])
+            plt.figure()
+            if folded:
+                plt.title('{} Period {}s ({})'.format(
+                    row['SWASP ID'],
+                    row['Period'],
+                    row['Classification Label'],
+                ))
+            else:
+                plt.title(row['SWASP ID'])
+            if clip:
+                ts_data = sigma_clip(ts['TAMFLUX2'], sigma=sigma)
+            else:
+                ts_data = ts['TAMFLUX2']
+            plt.plot(ts.time.jd, ts_data, 'k.', markersize=1)
         
     def _query_vsx_for_coord(self, coord, cache):
         coord_str = coord.to_string()
