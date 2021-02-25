@@ -422,6 +422,9 @@ class AggregatedClassifications(CoordinatesMixin):
     def get_class(self, classification):
         return self.__class__(df=self.df[self.df['Classification'] == classification])
 
+    def remove_class(self, classification):
+        return self.__class__(df=self.df[self.df['Classification'] != classification])
+
     @property
     def pulsators(self):
         return self.get_class(self.PULSATOR)
@@ -445,6 +448,10 @@ class AggregatedClassifications(CoordinatesMixin):
     @property
     def junk(self):
         return self.get_class(self.JUNK)
+
+    @property
+    def real(self):
+        return self.remove_class(self.JUNK)
 
 
 class UnifiedSubjects(ZooniverseSubjects, FoldedLightcurves, AggregatedClassifications):
