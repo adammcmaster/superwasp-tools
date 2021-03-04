@@ -1,7 +1,10 @@
+import functools
+import multiprocessing
 import os
 import pathlib
 import shelve
 
+import numpy
 import pandas
 import ujson
 import urllib
@@ -59,7 +62,25 @@ class PandasDFWrapper(object):
         ):
             return (pandas.read_pickle(cache_file_path), cache_file_path)
         return (None, cache_file_path)
-        
+
+    def _mpapply(self, func, df=None, axis='rows'):
+        """
+        Splits the DataFrame and applies the function across a pool of worker processes.
+
+        On experiment this can actually add a lot of overhead to execution time.
+        But it might be worth it on really long running operations.
+        """
+        if df is None:
+            df = self.df
+
+        split_df = numpy.array_split(df, multiprocessing.cpu_count())
+
+        results = []
+        with multiprocessing.Pool() as pool:
+            for part in split_df:
+                results.append(pool.apply_async(part.apply, args=(func, axis)))
+            return pandas.concat([r.get() for r in results])
+
 
 class CoordinatesMixin(object):
     VSX_MAG_AMPLITUDE_FLAG = '('
