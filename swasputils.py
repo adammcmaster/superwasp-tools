@@ -6,6 +6,7 @@ import shelve
 
 import numpy
 import pandas
+import seaborn
 import ujson
 import urllib
 
@@ -22,7 +23,7 @@ from astropy.stats import sigma_clip
 
 from astroquery.vizier import Vizier
 
-import matplotlib.pyplot as plt
+from matplotlib import pyplot
 
 astropy.utils.data.Conf.remote_timeout.set(60)
 
@@ -128,7 +129,7 @@ class CoordinatesMixin(object):
         if 'FITS URL' not in self.df:
             self.df['FITS URL'] = self.fits_urls
     
-    def plot(self, folded=False, clip=False, sigma=4):
+    def plot(self, folded=False, clip=False, sigma=4, hue=None):
         if folded:
             self.add_classification_labels()
             if 'Period' not in self.df:
@@ -143,20 +144,34 @@ class CoordinatesMixin(object):
                 if row['SWASP ID'] in plotted_ids:
                     continue
                 plotted_ids.add(row['SWASP ID'])
-            plt.figure()
+            if clip:
+                ts_flux = sigma_clip(ts['TAMFLUX2'], sigma=sigma)
+            else:
+                ts_flux = ts['TAMFLUX2']
+            
+            ts_data = {
+                'time': ts.time.jd,
+                'flux': ts_flux,
+                'camera': ts['CAMERA_ID'],
+            }
+            pyplot.figure()
+            plot = seaborn.scatterplot(
+                data=ts_data,
+                x='time',
+                y='flux',
+                hue=hue,
+                alpha=0.5,
+                s=1,
+                palette='Set2',
+            )
             if folded:
-                plt.title('{} Period {}s ({})'.format(
+                plot.set_title('{} Period {}s ({})'.format(
                     row['SWASP ID'],
                     row['Period'],
                     row['Classification Label'],
                 ))
             else:
-                plt.title(row['SWASP ID'])
-            if clip:
-                ts_data = sigma_clip(ts['TAMFLUX2'], sigma=sigma)
-            else:
-                ts_data = ts['TAMFLUX2']
-            plt.plot(ts.time.jd, ts_data, 'k.', markersize=1)
+                plot.set_title(row['SWASP ID'])
         
     def _query_vsx_for_coord(self, coord, cache):
         coord_str = coord.to_string()
