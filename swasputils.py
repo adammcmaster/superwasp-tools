@@ -18,6 +18,7 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import astropy.io.fits as fits
 import astropy.utils.data
+from astropy.table import vstack
 from astropy.timeseries import TimeSeries
 from astropy.stats import sigma_clip
 
@@ -117,7 +118,10 @@ class CoordinatesMixin(object):
     @property
     def timeseries_folded(self):
         for period, timeseries in zip(self.df['Period'], self.timeseries):
-            yield timeseries.fold(period=period * u.second)
+            yield timeseries.fold(
+                period=period * u.second,
+                normalize_phase=False,
+            )
     
     def add_coords(self):
         if 'Coords' not in self.df:
@@ -129,6 +133,15 @@ class CoordinatesMixin(object):
         if 'FITS URL' not in self.df:
             self.df['FITS URL'] = self.fits_urls
     
+    def _extend_epochs(self, ts, epochs=1):
+        epoch_length = ts['time'].max() - ts['time'].min()
+        ts_out = [ts]
+        for i in range(epochs):
+            ts_new = ts.copy()
+            ts_new['time'] = ts_new['time'] + epoch_length * (i + 1)
+            ts_out.append(ts_new)
+        return vstack(ts_out)
+
     def plot(self, folded=False, clip=False, sigma=4, hue=None):
         if folded:
             self.add_classification_labels()
@@ -140,10 +153,13 @@ class CoordinatesMixin(object):
             ts_iter = self.timeseries
 
         for (subject_id, row), ts in zip(self.df.iterrows(), ts_iter):
-            if not folded:
+            if folded:
+                ts = self._extend_epochs(ts)
+            else:
                 if row['SWASP ID'] in plotted_ids:
                     continue
                 plotted_ids.add(row['SWASP ID'])
+
             if clip:
                 ts_flux = sigma_clip(ts['TAMFLUX2'], sigma=sigma)
             else:
