@@ -120,7 +120,6 @@ class CoordinatesMixin(object):
         for period, timeseries in zip(self.df['Period'], self.timeseries):
             yield timeseries.fold(
                 period=period * u.second,
-                normalize_phase=False,
             )
     
     def add_coords(self):
