@@ -111,7 +111,7 @@ class CoordinatesMixin(object):
     @property
     def timeseries(self):
         for fits_file in self.fits:
-            hjd_col = fits.Column(name='HJD', format='D', array=fits_file[1].data['TMID']/86400 + 2453005.5)
+            hjd_col = fits.Column(name='HJD', format='D', array=fits_file[1].data['TMID'] / 86400 + 2453005.5)
             lc_data = fits.BinTableHDU.from_columns(fits_file[1].data.columns + fits.ColDefs([hjd_col]))
             yield TimeSeries.read(lc_data, time_column='HJD', time_format='jd')
             
