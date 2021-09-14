@@ -29,7 +29,7 @@ from matplotlib import pyplot
 astropy.utils.data.Conf.remote_timeout.set(60)
 
 
-DATA_LOCATION = os.path.join('..', '..', 'superwasp-data')
+DATA_LOCATION = os.path.join(os.path.expanduser('~'), 'Documents', 'superwasp-data')
 CACHE_LOCATION = os.path.join(DATA_LOCATION, 'cache')
 
 SECONDS_PER_DAY = 60 * 60 * 24
