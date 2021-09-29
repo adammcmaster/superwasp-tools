@@ -3,10 +3,12 @@ import os
 import sys
 
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, setdiff
+from astropy.table import Table, setdiff, hstack, vstack
 from astropy import units as u
 
 from astroquery.vizier import Vizier
+
+from IPython.display import clear_output
 
 module_path = os.path.abspath(os.path.join('..'))
 orig_sys_path = copy.deepcopy(sys.path)
@@ -55,6 +57,9 @@ class Catalogue(object):
         
     def __str__(self):
         return self.name
+    
+    def __repr__(self):
+        return self.name
         
     @property
     def full_table(self):
@@ -88,6 +93,36 @@ class Catalogue(object):
         return self.mag(self.matched_table)
     
     @property
+    def matching_table(self):
+        """
+        This generates a table suitable for cross-matching against other catalogues.
+        The table contains all of this catalogue's key columns (prefixed with the catalogue name)
+        plus the standard _RAJ2000 and _DEJ2000 columns for querying Vizier.
+        """
+        left_table = self.full_table[self.keys]
+        for key in self.keys:
+            left_table.rename_column(key, f'{self.name}:{key}')
+        right_table = Table(
+            data=[
+                self.full_coords.ra,
+                self.full_coords.dec,
+            ],
+            names=[
+                '_RAJ2000',
+                '_DEJ2000',
+            ],
+            dtype=[
+                'float64',
+                'float64',
+            ],
+            units={
+                '_RAJ2000': u.deg,
+                '_DEJ2000': u.deg
+            }
+        )
+        return hstack([left_table, right_table])
+    
+    @property
     def unmatched_table(self):
         if not self._unmatched_table:
             self._unmatched_table = setdiff(self.full_table, self.matched_table, keys=self.keys)
@@ -113,3 +148,32 @@ class Catalogue(object):
     
     def mag(self, table):
         return table[self.mag_col]
+    
+    def cross_match(self, other_catalogue):
+        """
+        Queries Vizier to cross match this catalogue with the other catalogue.
+        """
+        SPLIT_SIZE = 1000
+        source_table = self.matching_table
+        total_iterations = int(len(source_table) / SPLIT_SIZE) + 1
+        
+        results = []
+        for i in range(total_iterations):
+            clear_output(wait=True)
+            print(f'Matching {self} against {other_catalogue}: {i + 1}/{total_iterations}')
+            sources = source_table[i * SPLIT_SIZE : (i+1) * SPLIT_SIZE]
+            if len(sources) > 0:
+                try:
+                    results.append(Vizier.query_region(sources, radius=2*u.arcmin, catalog=other_catalogue.name)[0])
+                except IndexError:
+                    continue
+                for key in source_table.columns.keys():
+                    if key in ('_RAJ2000', '_DEJ2000'):
+                        continue
+                    results[-1].add_column(
+                        [ sources[key][i - 1] for i in results[-1]['_q'] ],
+                        name=key,
+                    )
+        if results:
+            results = vstack(results)
+        return results
