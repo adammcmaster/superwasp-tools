@@ -24,12 +24,14 @@ CATALOGUES = {
         'coord_cols': ('RAdeg', 'DEJ2000'),
         'coord_units': (u.deg, u.deg),
         'mag_col': 'magMax',
+        'per_col': 'Per',
     },
     'J/ApJS/247/44/table2': {
         'keys': ('_2MASS', 'FileName'),
         'coord_cols': ('RAJ2000', 'DEJ2000'),
         'coord_units': (u.hour, u.deg),
         'mag_col': 'Rmag',
+        'per_col': 'Per',
     },
 }
 
@@ -49,12 +51,13 @@ class Catalogue(object):
     def superwasp_sources(self):
         return Table.read(os.path.join(swasputils.CACHE_LOCATION, 'source_coords.fits'))
     
-    def __init__(self, name, keys, coord_cols, coord_units, mag_col):
+    def __init__(self, name, keys, coord_cols, coord_units, mag_col, per_col):
         self.name = name
         self.keys = keys
         self.coord_cols = coord_cols
         self.coord_units = coord_units
         self.mag_col = mag_col
+        self.per_col = per_col
     
         self._full_table = None
         self._matched_table = None
@@ -187,3 +190,6 @@ class Catalogue(object):
     
     def mag(self, table):
         return table[self.mag_col]
+    
+    def period(self, table):
+        return table[self.per_col]
