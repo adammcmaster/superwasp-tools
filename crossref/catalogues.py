@@ -40,6 +40,14 @@ class Catalogue(object):
     def all(cls):
         for catalogue, d in CATALOGUES.items():
             yield Catalogue(name=catalogue, **d)
+        
+    @classmethod
+    def coords_rad(self, coords):
+        return (coords.ra.wrap_at(180 * u.deg).radian, coords.dec.radian)
+        
+    @classmethod
+    def superwasp_sources(self):
+        return Table.read(os.path.join(swasputils.CACHE_LOCATION, 'source_coords.fits'))
     
     def __init__(self, name, keys, coord_cols, coord_units, mag_col):
         self.name = name
@@ -102,24 +110,7 @@ class Catalogue(object):
         left_table = self.full_table[self.keys]
         for key in self.keys:
             left_table.rename_column(key, f'{self.name}:{key}')
-        right_table = Table(
-            data=[
-                self.full_coords.ra,
-                self.full_coords.dec,
-            ],
-            names=[
-                '_RAJ2000',
-                '_DEJ2000',
-            ],
-            dtype=[
-                'float64',
-                'float64',
-            ],
-            units={
-                '_RAJ2000': u.deg,
-                '_DEJ2000': u.deg
-            }
-        )
+        right_table = self.coords_table(self.full_coords)
         return hstack([left_table, right_table])
     
     @property
@@ -141,20 +132,35 @@ class Catalogue(object):
     def coords(self, table):
         return SkyCoord(table[self.coord_cols[0]], table[self.coord_cols[1]], unit=self.coord_units)
     
-    def coords_rad(self, coords=None):
-        if not coords:
-            coords = self.full_coords
-        return (coords.ra.wrap_at(180 * u.deg).radian, coords.dec.radian)
+    def coords_table(self, coords):
+        return Table(
+            data=[
+                coords.ra,
+                coords.dec,
+            ],
+            names=[
+                '_RAJ2000',
+                '_DEJ2000',
+            ],
+            dtype=[
+                'float64',
+                'float64',
+            ],
+            units={
+                '_RAJ2000': u.deg,
+                '_DEJ2000': u.deg,
+            }
+        )
     
-    def mag(self, table):
-        return table[self.mag_col]
-    
-    def cross_match(self, other_catalogue):
+    def cross_match(self, other_catalogue=None, source_table=None):
         """
         Queries Vizier to cross match this catalogue with the other catalogue.
         """
         SPLIT_SIZE = 1000
-        source_table = self.matching_table
+        if not source_table:
+            if not other_catalogue:
+                raise RuntimeError('Need at least one of other_catalogue or source_table to cross match')
+            source_table = other_catalogue.matching_table
         total_iterations = int(len(source_table) / SPLIT_SIZE) + 1
         
         results = []
@@ -164,7 +170,7 @@ class Catalogue(object):
             sources = source_table[i * SPLIT_SIZE : (i+1) * SPLIT_SIZE]
             if len(sources) > 0:
                 try:
-                    results.append(Vizier.query_region(sources, radius=2*u.arcmin, catalog=other_catalogue.name)[0])
+                    results.append(Vizier.query_region(sources, radius=2*u.arcmin, catalog=self.name)[0])
                 except IndexError:
                     continue
                 for key in source_table.columns.keys():
@@ -176,4 +182,8 @@ class Catalogue(object):
                     )
         if results:
             results = vstack(results)
+            del results['_q']
         return results
+    
+    def mag(self, table):
+        return table[self.mag_col]
