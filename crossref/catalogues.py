@@ -71,11 +71,20 @@ class Catalogue(object):
     
     def __repr__(self):
         return self.name
-        
+
+    @property
+    def escaped_name(self):
+        return self.name.replace('/', '_')
+
     @property
     def full_table(self):
+        full_path = os.path.join(swasputils.CACHE_LOCATION, f'catalogue_full_{self.escaped_name}.ecsv')
         if not self._full_table:
-            self._full_table =  Vizier.get_catalogs(self.name)[0]
+            try:
+                self._full_table = Table.read(full_path)
+            except FileNotFoundError:
+                self._full_table =  Vizier.get_catalogs(self.name)[0]
+                self._full_table.write(full_path)
         return self._full_table
     
     @property
@@ -89,8 +98,7 @@ class Catalogue(object):
     @property
     def matched_table(self):
         if not self._matched_table:
-            catalogue_escaped = self.name.replace('/', '_')
-            self._matched_table = Table.read(os.path.join(swasputils.CACHE_LOCATION, f'catalogue_match_{catalogue_escaped}.ecsv'))
+            self._matched_table = Table.read(os.path.join(swasputils.CACHE_LOCATION, f'catalogue_match_{self.escaped_name}.ecsv'))
         return self._matched_table
     
     @property
